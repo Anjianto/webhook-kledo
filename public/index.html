@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kledo Webhook Tester</title>
+    <style>
+      :root {
+        --bg: #f6f7f9;
+        --surface: #ffffff;
+        --border: #dfe3e8;
+        --text: #1c2430;
+        --muted: #5f6b7a;
+        --accent: #0b63ce;
+        --accent-text: #ffffff;
+        --ok-bg: #e3f5e9;
+        --ok-text: #17663a;
+        --warn-bg: #fff3d6;
+        --warn-text: #7a5200;
+        --err-bg: #fde5e5;
+        --err-text: #a12222;
+        --code-bg: #f1f3f6;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #11151b;
+          --surface: #181e26;
+          --border: #2a323d;
+          --text: #e4e8ee;
+          --muted: #95a1b0;
+          --accent: #4c9bff;
+          --accent-text: #0b1420;
+          --ok-bg: #143323;
+          --ok-text: #7fdca4;
+          --warn-bg: #3a2d0c;
+          --warn-text: #f3c969;
+          --err-bg: #3d1717;
+          --err-text: #ff9b9b;
+          --code-bg: #10141a;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 24px 16px 64px;
+      }
+
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px 12px;
+        margin-bottom: 16px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 20px;
+      }
+
+      h2 {
+        margin: 0 0 12px;
+        font-size: 15px;
+      }
+
+      section {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 16px;
+      }
+
+      label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+
+      .field {
+        margin-bottom: 12px;
+      }
+
+      .row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+
+      .row > input {
+        flex: 1 1 240px;
+        min-width: 0;
+      }
+
+      input {
+        font: inherit;
+        font-family: var(--mono);
+        padding: 7px 10px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      button {
+        font: inherit;
+        padding: 7px 12px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--surface);
+        color: var(--text);
+        cursor: pointer;
+      }
+
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--accent-text);
+        font-weight: 600;
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+
+      .hint {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 1px 8px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+
+      .badge.ok {
+        background: var(--ok-bg);
+        color: var(--ok-text);
+      }
+
+      .badge.warn {
+        background: var(--warn-bg);
+        color: var(--warn-text);
+      }
+
+      .badge.err {
+        background: var(--err-bg);
+        color: var(--err-text);
+      }
+
+      .badge.neutral {
+        background: var(--code-bg);
+        color: var(--muted);
+      }
+
+      .urls {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 8px;
+      }
+
+      .url {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .url code {
+        flex: 1;
+        min-width: 0;
+        overflow-x: auto;
+        white-space: nowrap;
+        padding: 7px 10px;
+        background: var(--code-bg);
+        border-radius: 6px;
+        font-family: var(--mono);
+        font-size: 13px;
+      }
+
+      .events-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .events-head h2 {
+        margin: 0;
+      }
+
+      .empty {
+        padding: 24px;
+        text-align: center;
+        color: var(--muted);
+        border: 1px dashed var(--border);
+        border-radius: 8px;
+      }
+
+      details.event {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        margin-bottom: 8px;
+        overflow: hidden;
+      }
+
+      details.event.fresh {
+        animation: flash 1.2s ease-out;
+      }
+
+      @keyframes flash {
+        from {
+          background: var(--warn-bg);
+        }
+      }
+
+      details.event > summary {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 10px;
+        padding: 10px 12px;
+        cursor: pointer;
+        list-style: none;
+      }
+
+      details.event > summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .topic {
+        font-weight: 600;
+        font-family: var(--mono);
+      }
+
+      .time {
+        color: var(--muted);
+        font-size: 13px;
+        margin-left: auto;
+      }
+
+      .event-body {
+        padding: 0 12px 12px;
+        display: grid;
+        gap: 12px;
+      }
+
+      .block-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 4px;
+        font-weight: 600;
+      }
+
+      .block-head button {
+        padding: 2px 8px;
+        font-size: 12px;
+      }
+
+      pre {
+        margin: 0;
+        padding: 10px;
+        background: var(--code-bg);
+        border-radius: 6px;
+        overflow: auto;
+        max-height: 420px;
+        font-family: var(--mono);
+        font-size: 12.5px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .live {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .live::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--ok-text);
+      }
+
+      .live.paused::before {
+        background: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Kledo Webhook Tester</h1>
+        <span id="store-badge" class="badge neutral">memuat…</span>
+      </header>
+
+      <section>
+        <h2>Pengaturan</h2>
+
+        <div class="field">
+          <label for="channel-id">Channel ID</label>
+          <div class="row">
+            <input id="channel-id" autocomplete="off" spellcheck="false" />
+            <button id="new-channel" type="button">Buat channel baru</button>
+          </div>
+          <p class="hint">Setiap QA pakai channel sendiri. Pakai channel ID yang sama untuk lihat log dari device lain.</p>
+        </div>
+
+        <div class="field">
+          <label for="secret">Signing secret</label>
+          <div class="row">
+            <input id="secret" type="password" autocomplete="off" spellcheck="false" placeholder="Tempel signing secret dari Kledo" />
+            <button id="toggle-secret" type="button">Tampilkan</button>
+            <button id="save" type="button" class="primary">Simpan</button>
+          </div>
+          <p id="save-status" class="hint">Secret disimpan di browser ini dan dikirim ke server untuk channel ini.</p>
+        </div>
+      </section>
+
+      <section>
+        <h2>URL webhook</h2>
+        <div id="urls" class="urls"></div>
+        <p class="hint">Topic lain: ganti bagian akhir URL, misalnya <code>/webhook/bills</code>.</p>
+      </section>
+
+      <section>
+        <div class="events-head">
+          <h2>Webhook masuk <span id="event-count" class="badge neutral">0</span></h2>
+          <div class="row">
+            <span id="live" class="live">Live</span>
+            <button id="resume" type="button" hidden>Lanjutkan live</button>
+            <button id="clear" type="button">Hapus log</button>
+          </div>
+        </div>
+        <div id="events"></div>
+      </section>
+    </main>
+
+    <script>
+      // Setiap polling = 1 command Upstash. Kuota gratis Upstash 500 ribu command per bulan,
+      // jadi polling dibuat lambat dan berhenti otomatis kalau halaman tidak dipakai.
+      const POLL_INTERVAL_MS = 5000;
+      const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+      const TOPICS = ["verify", "invoices", "expenses"];
+      const STORAGE_KEYS = { channelId: "webhookTester.channelId", secret: "webhookTester.secret" };
+
+      const $ = (id) => document.getElementById(id);
+
+      // localStorage bisa melempar error di private window atau saat storage diblokir.
+      const storage = {
+        get(key) {
+          try {
+            return localStorage.getItem(key);
+          } catch {
+            return null;
+          }
+        },
+        set(key, value) {
+          try {
+            localStorage.setItem(key, value);
+          } catch {
+            // Abaikan. Halaman tetap jalan, hanya nilai tidak diingat.
+          }
+        },
+      };
+
+      const state = {
+        channelId: "",
+        lastEventIds: "",
+        openIds: new Set(),
+        seenIds: new Set(),
+        pollTimer: null,
+        lastActivityAt: Date.now(),
+      };
+
+      function generateChannelId() {
+        const bytes = crypto.getRandomValues(new Uint8Array(8));
+
+        return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+      }
+
+      function isValidChannelId(value) {
+        return /^[A-Za-z0-9_-]{6,64}$/.test(value);
+      }
+
+      function webhookUrl(topic) {
+        return `${location.origin}/c/${state.channelId}/webhook/${topic}`;
+      }
+
+      async function copyText(text, button) {
+        const label = button.textContent;
+
+        try {
+          await navigator.clipboard.writeText(text);
+          button.textContent = "Tersalin";
+        } catch {
+          button.textContent = "Gagal salin";
+        }
+
+        setTimeout(() => (button.textContent = label), 1200);
+      }
+
+      function el(tag, props = {}, children = []) {
+        const node = document.createElement(tag);
+
+        Object.assign(node, props);
+        node.append(...children);
+
+        return node;
+      }
+
+      function renderUrls() {
+        const container = $("urls");
+
+        container.replaceChildren(
+          ...TOPICS.map((topic) => {
+            const url = webhookUrl(topic);
+            const button = el("button", { type: "button", textContent: "Salin" });
+
+            button.addEventListener("click", () => copyText(url, button));
+
+            return el("div", { className: "url" }, [el("code", { textContent: url }), button]);
+          }),
+        );
+      }
+
+      function setSaveStatus(text, tone = "") {
+        const node = $("save-status");
+
+        node.textContent = text;
+        node.className = tone ? `badge ${tone}` : "hint";
+      }
+
+      async function syncSecret(secret) {
+        const res = await fetch(`/api/channels/${state.channelId}/secret`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ secret }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+
+          throw new Error(data.error || `HTTP ${res.status}`);
+        }
+      }
+
+      async function saveSettings() {
+        const channelId = $("channel-id").value.trim();
+        const secret = $("secret").value.trim();
+
+        if (!isValidChannelId(channelId)) {
+          setSaveStatus("Channel ID harus 6–64 karakter: huruf, angka, - atau _.", "err");
+          return;
+        }
+
+        if (!secret) {
+          setSaveStatus("Isi signing secret dulu.", "err");
+          return;
+        }
+
+        $("save").disabled = true;
+        switchChannel(channelId);
+        storage.set(STORAGE_KEYS.secret, secret);
+
+        try {
+          await syncSecret(secret);
+          setSaveStatus(`Tersimpan ${new Date().toLocaleTimeString("id-ID")}. Webhook siap dites.`, "ok");
+        } catch (error) {
+          setSaveStatus(`Gagal kirim secret ke server: ${error.message}`, "err");
+        } finally {
+          $("save").disabled = false;
+        }
+      }
+
+      function switchChannel(channelId) {
+        if (channelId === state.channelId) {
+          return;
+        }
+
+        state.channelId = channelId;
+        state.lastEventIds = "";
+        state.openIds.clear();
+        state.seenIds.clear();
+        $("channel-id").value = channelId;
+        storage.set(STORAGE_KEYS.channelId, channelId);
+
+        renderUrls();
+        renderEvents([], { initial: true });
+        pollEvents({ initial: true });
+      }
+
+      function signatureBadge(signature) {
+        if (!signature) {
+          return null;
+        }
+
+        const map = {
+          valid: ["ok", "signature valid"],
+          invalid: ["err", "signature invalid"],
+          missing: ["neutral", "tanpa signature"],
+          "no-secret": ["warn", "secret belum diset"],
+        };
+        const [tone, text] = map[signature.status] ?? ["neutral", signature.status];
+
+        return el("span", { className: `badge ${tone}`, textContent: text });
+      }
+
+      function statusBadge(status) {
+        const tone = status >= 500 ? "err" : status >= 400 ? "warn" : "ok";
+
+        return el("span", { className: `badge ${tone}`, textContent: `→ ${status}` });
+      }
+
+      function codeBlock(title, value) {
+        const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+        const copy = el("button", { type: "button", textContent: "Salin" });
+
+        copy.addEventListener("click", () => copyText(text, copy));
+
+        return el("div", {}, [
+          el("div", { className: "block-head" }, [el("span", { textContent: title }), copy]),
+          el("pre", { textContent: text || "(kosong)" }),
+        ]);
+      }
+
+      function renderEvent(event, isFresh) {
+        const time = new Date(event.receivedAt);
+        const summaryChildren = [
+          el("span", { className: "topic", textContent: event.topic }),
+          statusBadge(event.response.status),
+          signatureBadge(event.signature),
+          el("span", {
+            className: "time",
+            textContent: time.toLocaleString("id-ID", { dateStyle: "short", timeStyle: "medium" }),
+          }),
+        ].filter(Boolean);
+
+        const blocks = [codeBlock("Response yang dikirim ke BE", event.response)];
+
+        if (event.signature) {
+          blocks.push(codeBlock("Signature", event.signature));
+        }
+
+        blocks.push(
+          codeBlock("Body", event.body ?? event.bodyText),
+          codeBlock("Headers", event.headers),
+        );
+
+        const details = el("details", { className: isFresh ? "event fresh" : "event", open: state.openIds.has(event.id) }, [
+          el("summary", {}, summaryChildren),
+          el("div", { className: "event-body" }, blocks),
+        ]);
+
+        details.addEventListener("toggle", () => {
+          if (details.open) {
+            state.openIds.add(event.id);
+          } else {
+            state.openIds.delete(event.id);
+          }
+        });
+
+        return details;
+      }
+
+      function renderEvents(events, { initial = false } = {}) {
+        const ids = events.map((event) => event.id).join(",");
+
+        if (!initial && ids === state.lastEventIds) {
+          return;
+        }
+
+        state.lastEventIds = ids;
+        $("event-count").textContent = String(events.length);
+
+        if (events.length === 0) {
+          $("events").replaceChildren(
+            el("div", { className: "empty", textContent: "Belum ada webhook. Daftarkan URL di atas ke Kledo, lalu buat atau ubah data." }),
+          );
+          return;
+        }
+
+        const nodes = events.map((event) => renderEvent(event, !initial && !state.seenIds.has(event.id)));
+
+        if (!initial) {
+          state.lastActivityAt = Date.now();
+        }
+
+        events.forEach((event) => state.seenIds.add(event.id));
+        $("events").replaceChildren(...nodes);
+      }
+
+      async function pollEvents({ initial = false } = {}) {
+        const channelId = state.channelId;
+
+        try {
+          const res = await fetch(`/api/channels/${channelId}/events`);
+          const data = await res.json();
+
+          // Abaikan hasil lama kalau user sudah pindah channel saat request berjalan.
+          if (channelId === state.channelId && res.ok) {
+            renderEvents(data.events, { initial });
+          }
+        } catch {
+          // Coba lagi di polling berikutnya.
+        }
+      }
+
+      // Polling hanya saat tab terlihat dan halaman masih dipakai,
+      // supaya kuota command Upstash tidak habis oleh tab yang terlupa.
+      function pollTick() {
+        if (Date.now() - state.lastActivityAt > IDLE_TIMEOUT_MS) {
+          stopPolling("Jeda (idle)");
+          $("resume").hidden = false;
+          return;
+        }
+
+        pollEvents();
+      }
+
+      function startPolling() {
+        clearInterval(state.pollTimer);
+        state.lastActivityAt = Date.now();
+        state.pollTimer = setInterval(pollTick, POLL_INTERVAL_MS);
+        $("live").classList.remove("paused");
+        $("live").textContent = "Live";
+        $("resume").hidden = true;
+      }
+
+      function stopPolling(label = "Jeda") {
+        clearInterval(state.pollTimer);
+        state.pollTimer = null;
+        $("live").classList.add("paused");
+        $("live").textContent = label;
+      }
+
+      function resumePolling() {
+        pollEvents();
+        startPolling();
+      }
+
+      async function clearEvents() {
+        if (!confirm("Hapus semua log webhook di channel ini?")) {
+          return;
+        }
+
+        await fetch(`/api/channels/${state.channelId}/events`, { method: "DELETE" });
+        state.openIds.clear();
+        renderEvents([], { initial: true });
+      }
+
+      async function showStoreKind() {
+        const badge = $("store-badge");
+
+        try {
+          const { store } = await (await fetch("/api/info")).json();
+          const isLocal = ["localhost", "127.0.0.1"].includes(location.hostname);
+
+          if (store === "redis") {
+            badge.className = "badge ok";
+            badge.textContent = "storage: redis";
+          } else {
+            badge.className = isLocal ? "badge neutral" : "badge err";
+            badge.textContent = isLocal ? "storage: memory (dev)" : "storage: memory — set env Upstash";
+          }
+        } catch {
+          badge.className = "badge err";
+          badge.textContent = "server tidak merespons";
+        }
+      }
+
+      async function init() {
+        const savedChannelId = storage.get(STORAGE_KEYS.channelId);
+        const savedSecret = storage.get(STORAGE_KEYS.secret);
+
+        switchChannel(isValidChannelId(savedChannelId ?? "") ? savedChannelId : generateChannelId());
+        showStoreKind();
+
+        // Sync ulang secret saat halaman dibuka. Secret di server punya TTL, jadi bisa sudah expired.
+        if (savedSecret) {
+          $("secret").value = savedSecret;
+
+          try {
+            await syncSecret(savedSecret);
+            setSaveStatus("Secret dari browser ini sudah tersinkron ke server.", "ok");
+          } catch (error) {
+            setSaveStatus(`Gagal sync secret: ${error.message}`, "err");
+          }
+        }
+
+        $("save").addEventListener("click", saveSettings);
+        $("secret").addEventListener("keydown", (event) => event.key === "Enter" && saveSettings());
+        $("new-channel").addEventListener("click", () => {
+          switchChannel(generateChannelId());
+          setSaveStatus("Channel baru dibuat. Klik Simpan untuk kirim secret ke channel ini.", "warn");
+        });
+        $("toggle-secret").addEventListener("click", () => {
+          const input = $("secret");
+          const hidden = input.type === "password";
+
+          input.type = hidden ? "text" : "password";
+          $("toggle-secret").textContent = hidden ? "Sembunyikan" : "Tampilkan";
+        });
+        $("clear").addEventListener("click", clearEvents);
+        $("resume").addEventListener("click", resumePolling);
+
+        // Klik atau ketik dihitung aktivitas, supaya polling tidak idle saat QA sedang membaca log.
+        for (const type of ["click", "keydown"]) {
+          document.addEventListener(type, () => (state.lastActivityAt = Date.now()));
+        }
+
+        document.addEventListener("visibilitychange", () => {
+          if (document.hidden) {
+            stopPolling();
+          } else {
+            resumePolling();
+          }
+        });
+
+        startPolling();
+      }
+
+      init();
+    </script>
+  </body>
+</html>

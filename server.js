@@ -1,71 +1,171 @@
 // server.js
 import express from "express";
 import crypto from "crypto";
+import path from "path";
+import { fileURLToPath } from "url";
 import dotenv from "dotenv";
+import { createStore } from "./lib/store.js";
+import { extractTopLevelValue } from "./lib/raw-json.js";
+
 dotenv.config();
 
-const SIGNING_SECRET = process.env.SIGNING_SECRET;
+const CHANNEL_ID_PATTERN = /^[A-Za-z0-9_-]{6,64}$/;
+const MAX_STORED_BODY_CHARS = 200_000;
+const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "public");
 
+const store = createStore();
 const app = express();
-app.use(express.json());
 
-app.post("/webhook/verify", (req, res) => {
-  const { challenge } = req.body;
+// Webhook butuh raw body. Signature dari BE dihitung dari teks JSON asli,
+// dan JSON.stringify ulang bisa beda urutan key, spasi, atau escape unicode.
+const rawBody = express.raw({ type: () => true, limit: "5mb" });
+
+const hmacHex = (secret, value) =>
+  crypto.createHmac("sha256", secret).update(value).digest("hex");
+
+function parseBody(req) {
+  const text = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
+
+  try {
+    return { text, json: text ? JSON.parse(text) : null };
+  } catch {
+    return { text, json: null };
+  }
+}
+
+function checkSignature(req, secret, body) {
+  const received = req.headers["x-kledo-signature"];
+
+  if (!received) {
+    return { status: "missing" };
+  }
+
+  if (!secret) {
+    return { status: "no-secret", received };
+  }
+
+  // Format BE Kledo: header `sha256=<hex>`, hex = HMAC-SHA256(secret, teks JSON field `data`).
+  // Raw body utuh tetap dicek sebagai cadangan untuk payload tanpa field `data`.
+  const receivedHex = received.replace(/^sha256=/i, "");
+  const candidates = [
+    ["data-field", extractTopLevelValue(body.text, "data")],
+    ["raw-body", body.text],
+  ].filter(([, message]) => message !== null);
+
+  for (const [method, message] of candidates) {
+    const expected = hmacHex(secret, message);
+
+    if (receivedHex === expected) {
+      return { status: "valid", method, received, expected };
+    }
+  }
+
+  const [method, message] = candidates[0];
+
+  return { status: "invalid", method, received, expected: hmacHex(secret, message) };
+}
+
+function buildVerifyResponse(secret, body) {
+  const challenge = body.json?.challenge;
 
   if (!challenge) {
-    return res.status(400).json({ error: "Missing challenge" });
+    return { status: 400, body: { error: "Missing challenge" } };
   }
 
-  const hmacObj = crypto.createHmac("sha256", SIGNING_SECRET);
-  hmacObj.update(challenge);
-  const answer = hmacObj.digest("hex");
-
-  console.log("✅ Answer:", answer);
-  res.json({ answer });
-});
-
-app.post("/webhook/invoices", (req, res) => {
-  console.log("📄 Invoice webhook received:");
-  console.log("Headers:", req.headers);
-  console.log("Body:", JSON.stringify(req.body, null, 2));
-
-  // Verify signature if present
-  const signature = req.headers["x-kledo-signature"];
-  if (signature && SIGNING_SECRET) {
-    const hmacObj = crypto.createHmac("sha256", SIGNING_SECRET);
-    hmacObj.update(JSON.stringify(req.body));
-    const expectedSignature = hmacObj.digest("hex");
-
-    if (signature !== expectedSignature) {
-      console.log("❌ Invalid signature");
-      return res.status(401).json({ error: "Invalid signature" });
-    }
-    console.log("✅ Signature verified");
+  if (!secret) {
+    return { status: 400, body: { error: "Signing secret belum diset untuk channel ini" } };
   }
 
-  res.status(200).json({ success: true, message: "Invoice webhook received" });
-});
+  return { status: 200, body: { answer: hmacHex(secret, challenge) } };
+}
 
-app.post("/webhook/expenses", (req, res) => {
-  console.log("💰 Expense webhook received:");
-  console.log("Headers:", req.headers);
-  console.log("Body:", JSON.stringify(req.body, null, 2));
-
-  // Verify signature if present
-  const signature = req.headers["x-kledo-signature"];
-  if (signature && SIGNING_SECRET) {
-    const hmacObj = crypto.createHmac("sha256", SIGNING_SECRET);
-    hmacObj.update(JSON.stringify(req.body));
-    const expectedSignature = hmacObj.digest("hex");
-
-    if (signature !== expectedSignature) {
-      console.log("❌ Invalid signature");
-      return res.status(401).json({ error: "Invalid signature" });
-    }
-    console.log("✅ Signature verified");
+function buildEventResponse(topic, signature) {
+  if (signature.status === "invalid") {
+    return { status: 401, body: { error: "Invalid signature" } };
   }
 
-  res.status(200).json({ success: true, message: "Expense webhook received" });
+  return { status: 200, body: { success: true, message: `${topic} webhook received` } };
+}
+
+async function handleWebhook(req, res, { channelId, topic, secret }) {
+  const body = parseBody(req);
+  const isVerify = topic === "verify";
+  const signature = isVerify ? null : checkSignature(req, secret, body);
+  const response = isVerify ? buildVerifyResponse(secret, body) : buildEventResponse(topic, signature);
+
+  console.log(`📨 [${channelId}] ${topic} → ${response.status}`, signature?.status ?? "");
+
+  const event = {
+    id: `${Date.now()}-${crypto.randomBytes(3).toString("hex")}`,
+    receivedAt: new Date().toISOString(),
+    topic,
+    method: req.method,
+    path: req.originalUrl,
+    headers: req.headers,
+    body: body.json,
+    bodyText: body.text.slice(0, MAX_STORED_BODY_CHARS),
+    signature,
+    response,
+  };
+
+  // Simpan log sebelum kirim response. Vercel bisa membekukan function setelah response terkirim.
+  // Gagal simpan log tidak boleh menggagalkan response ke BE.
+  try {
+    await store.addEvent(channelId, event);
+  } catch (error) {
+    console.error("❌ Gagal simpan event:", error);
+  }
+
+  res.status(response.status).json(response.body);
+}
+
+function requireChannelId(req, res, next) {
+  if (!CHANNEL_ID_PATTERN.test(req.params.channelId)) {
+    return res.status(400).json({ error: "channelId tidak valid" });
+  }
+
+  next();
+}
+
+app.use(express.static(PUBLIC_DIR));
+
+app.get("/api/info", (req, res) => {
+  res.json({ store: store.kind });
 });
 
-app.listen(8000, () => console.log("Server running on port 8000"));
+app.put("/api/channels/:channelId/secret", requireChannelId, express.json(), async (req, res) => {
+  const secret = typeof req.body?.secret === "string" ? req.body.secret.trim() : "";
+
+  if (!secret) {
+    return res.status(400).json({ error: "Secret wajib diisi" });
+  }
+
+  await store.setSecret(req.params.channelId, secret);
+  res.json({ success: true });
+});
+
+app.get("/api/channels/:channelId/events", requireChannelId, async (req, res) => {
+  res.json({ events: await store.listEvents(req.params.channelId) });
+});
+
+app.delete("/api/channels/:channelId/events", requireChannelId, async (req, res) => {
+  await store.clearEvents(req.params.channelId);
+  res.json({ success: true });
+});
+
+// Endpoint webhook per channel. Secret diambil dari store, diset QA lewat UI.
+app.post("/c/:channelId/webhook/:topic", requireChannelId, rawBody, async (req, res) => {
+  const { channelId, topic } = req.params;
+  const secret = await store.getSecret(channelId);
+
+  await handleWebhook(req, res, { channelId, topic, secret });
+});
+
+// Vercel memanggil app yang di-export. Server lokal tetap listen seperti biasa.
+if (!process.env.VERCEL) {
+  const port = Number(process.env.PORT) || 8000;
+
+  app.listen(port, () => console.log(`Server running on port ${port} (store: ${store.kind})`));
+}
+
+export default app;
