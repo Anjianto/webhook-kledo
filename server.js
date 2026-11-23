@@ -5,6 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import { createStore } from "./lib/store.js";
+import { extractTopLevelValue } from "./lib/raw-json.js";
 
 dotenv.config();
 
@@ -15,7 +16,7 @@ const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "publ
 const store = createStore();
 const app = express();
 
-// Webhook butuh raw body. Signature dari BE dihitung dari byte body asli,
+// Webhook butuh raw body. Signature dari BE dihitung dari teks JSON asli,
 // dan JSON.stringify ulang bisa beda urutan key, spasi, atau escape unicode.
 const rawBody = express.raw({ type: () => true, limit: "5mb" });
 
@@ -43,23 +44,25 @@ function checkSignature(req, secret, body) {
     return { status: "no-secret", received };
   }
 
-  const expected = hmacHex(secret, body.text);
+  // Format BE Kledo: header `sha256=<hex>`, hex = HMAC-SHA256(secret, teks JSON field `data`).
+  // Raw body utuh tetap dicek sebagai cadangan untuk payload tanpa field `data`.
+  const receivedHex = received.replace(/^sha256=/i, "");
+  const candidates = [
+    ["data-field", extractTopLevelValue(body.text, "data")],
+    ["raw-body", body.text],
+  ].filter(([, message]) => message !== null);
 
-  if (received === expected) {
-    return { status: "valid", method: "raw-body", received, expected };
-  }
+  for (const [method, message] of candidates) {
+    const expected = hmacHex(secret, message);
 
-  // Cara lama server ini: hitung ulang dari JSON hasil parse.
-  // Tetap dicek supaya perilaku lama tidak hilang kalau BE sign hasil stringify.
-  if (body.json !== null) {
-    const expectedFromJson = hmacHex(secret, JSON.stringify(body.json));
-
-    if (received === expectedFromJson) {
-      return { status: "valid", method: "json-stringify", received, expected: expectedFromJson };
+    if (receivedHex === expected) {
+      return { status: "valid", method, received, expected };
     }
   }
 
-  return { status: "invalid", received, expected };
+  const [method, message] = candidates[0];
+
+  return { status: "invalid", method, received, expected: hmacHex(secret, message) };
 }
 
 function buildVerifyResponse(secret, body) {
